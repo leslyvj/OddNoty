@@ -323,5 +323,40 @@ async def main() -> None:
             await asyncio.sleep(settings.WORKER_INTERVAL_SECONDS)
 
 
+# ── FastAPI Health Check (for Render Free Tier) ──────────────────────────
+
+from fastapi import FastAPI
+import uvicorn
+import os
+
+app = FastAPI()
+
+@app.get("/")
+async def health_check():
+    return {
+        "status": "OddNoty Worker is running!",
+        "time_utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    }
+
+async def run_server():
+    """Start the health check server on the port provided by Render."""
+    port = int(os.environ.get("PORT", 10000))
+    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="error")
+    server = uvicorn.Server(config)
+    await server.serve()
+
+# ── Main Entry Point ──────────────────────────────────────────────────────
+
+async def start():
+    """Run both the health server and the worker simultaneously."""
+    # Start the worker and the server in parallel
+    await asyncio.gather(
+        run_server(),
+        main()
+    )
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(start())
+    except KeyboardInterrupt:
+        pass
