@@ -388,5 +388,40 @@ async def main():
     logger.info(f"OddsAPI remaining: {remaining}")
 
 
+# ── FastAPI Health Check (for Render Free Tier) ──────────────────────────
+
+from fastapi import FastAPI
+import uvicorn
+
+app = FastAPI()
+
+@app.get("/")
+async def health_check():
+    return {
+        "status": "OddNoty Tracker is running live!",
+        "match": f"{HOME_TEAM} vs {AWAY_TEAM}",
+        "time_utc": datetime.now(timezone.utc).isoformat()
+    }
+
+async def run_server():
+    """Start the health check server on the port provided by Render."""
+    port = int(os.environ.get("PORT", 10000))
+    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="error")
+    server = uvicorn.Server(config)
+    await server.serve()
+
+# ── Main Entry Point ──────────────────────────────────────────────────────
+
+async def start():
+    """Run both the health server and the tracker simultaneously."""
+    # Start the tracker and the server in parallel
+    await asyncio.gather(
+        run_server(),
+        main()
+    )
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(start())
+    except KeyboardInterrupt:
+        pass

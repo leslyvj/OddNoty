@@ -7,5 +7,7 @@ asyncpg==0.29.0
 redis==5.0.1
 python-dotenv==1.0.0
 PyYAML==6.0.1
+fastapi==0.109.2
+uvicorn==0.27.1
 # Optional: Betfair Exchange integration
 # betfairlightweight==2.20.1
