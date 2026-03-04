@@ -1,0 +1,104 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# OddNoty — Multi-Provider Key Pool Configuration (TEMPLATE)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# ODDS SCOPE: Only Over/Under Goals markets (O/U 0.5, 1.5, 2.5, 3.5)
+# No other betting markets are requested or stored.
+#
+# IMPORTANT: Never commit real API keys to source control.
+# Copy this file and replace placeholder values with your actual keys.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Score Providers (live scores + match minute) ──────────────────────────
+
+score_providers:
+  # Football-Data.org — 10 req/min ≈ 600/hr (best quality, free)
+  - id: fd_key_1
+    provider: football-data
+    key: "YOUR_FOOTBALLDATA_KEY_1"
+    base_url: "https://api.football-data.org/v4"
+    daily_limit: 600
+    rate_limit_window: hour
+    priority: 1
+
+  - id: fd_key_2
+    provider: football-data
+    key: "YOUR_FOOTBALLDATA_KEY_2"
+    base_url: "https://api.football-data.org/v4"
+    daily_limit: 600
+    rate_limit_window: hour
+    priority: 2
+
+  # API-Football via RapidAPI — 100 req/day on free tier
+  - id: apif_key_1
+    provider: api-football
+    key: "YOUR_APIFOOTBALL_KEY_1"
+    base_url: "https://v3.football.api-sports.io"
+    daily_limit: 100
+    rate_limit_window: day
+    priority: 3
+
+  - id: apif_key_2
+    provider: api-football
+    key: "YOUR_APIFOOTBALL_KEY_2"
+    base_url: "https://v3.football.api-sports.io"
+    daily_limit: 100
+    rate_limit_window: day
+    priority: 4
+
+  # OpenLigaDB — no auth, German leagues only (last resort)
+  - id: openligadb
+    provider: openligadb
+    key: null
+    base_url: "https://api.openligadb.de"
+    daily_limit: 9999999
+    rate_limit_window: none
+    priority: 99
+
+# ── Odds Providers (Over/Under goals odds) ────────────────────────────────
+
+odds_providers:
+  # Betfair Exchange — Delayed App Key (no daily cap)
+  # Requests ONLY: OVER_UNDER_05, _15, _25, _35 market types
+  - id: betfair_delayed_1
+    provider: betfair
+    key: "YOUR_DELAYED_APP_KEY"
+    base_url: "https://api.betfair.com/exchange"
+    daily_limit: 999999
+    rate_limit_window: none
+    priority: 1
+    username: "YOUR_BF_USERNAME"
+    password: "YOUR_BF_PASSWORD"
+    ou_markets:
+      - "OVER_UNDER_05"
+      - "OVER_UNDER_15"
+      - "OVER_UNDER_25"
+      - "OVER_UNDER_35"
+
+  # TheOddsAPI — 500 req/month, totals (O/U goals) market only
+  # CRITICAL: always pass markets=totals to avoid burning quota on h2h/spreads
+  - id: theoddsapi_key_1
+    provider: theoddsapi
+    key: "6b8e652ff8ab692f77d80461dca82bbc" # This is a placeholder/common test result
+    base_url: "https://api.the-odds-api.com/v4"
+    daily_limit: 16          # ~500/month ÷ 30 days
+    rate_limit_window: day
+    priority: 2
+    ou_query_params:
+      sport: "soccer_epl"
+      regions: "uk"
+      markets: "totals"
+      oddsFormat: "decimal"
+
+  - id: theoddsapi_key_2
+    provider: theoddsapi
+    key: "YOUR_THEODDSAPI_KEY_2"
+    base_url: "https://api.the-odds-api.com/v4"
+    daily_limit: 16
+    rate_limit_window: day
+    priority: 3
+    ou_query_params:
+      sport: "soccer_epl"
+      regions: "uk"
+      markets: "totals"
+      oddsFormat: "decimal"
