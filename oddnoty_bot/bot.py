@@ -276,9 +276,63 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=query.message.id, text="❌ Tracker session expired.")
     elif data == "cancel_track":
         await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=query.message.id, text="❌ Tracking cancelled.")
+    elif data.startswith("stop_"):
+        idx = int(data.split("_")[1])
+        uid = update.effective_chat.id
+        user_trackers = trackers.get_trackers(uid)
+        if 0 <= idx < len(user_trackers):
+            removed = user_trackers[idx]
+            market_name = removed.get('market', '?')
+            match_id = removed.get('match_id', '?')
+            # Remove by index
+            trackers.trackers[uid].pop(idx)
+            # Get match name from cache
+            mc = scraper.live_matches_cache.get(match_id)
+            title = f"{mc['home_team']} vs {mc['away_team']}" if mc else match_id
+            await context.bot.edit_message_text(chat_id=uid, message_id=query.message.id, text=f"🛑 Stopped tracking {market_name} on {title}.")
+        else:
+            await context.bot.edit_message_text(chat_id=uid, message_id=query.message.id, text="❌ Tracker not found.")
+    elif data == "stopall":
+        uid = update.effective_chat.id
+        trackers.clear_all(uid)
+        await context.bot.edit_message_text(chat_id=uid, message_id=query.message.id, text="🛑 All trackers stopped.")
+
+async def list_trackers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_chat.id
+    user_trackers = trackers.get_trackers(uid)
+    active = [t for t in user_trackers if t.get('active')]
+    
+    if not active:
+        await update.message.reply_text("📭 No active trackers. Type a match name to start tracking!")
+        return
+    
+    text = "📋 **Your Active Trackers:**\n\n"
+    keyboard = []
+    for i, t in enumerate(active):
+        mc = scraper.live_matches_cache.get(t['match_id'])
+        title = f"{mc['home_team']} vs {mc['away_team']}" if mc else t['match_id']
+        outcome_str = f" ({t['outcome']})" if t.get('outcome') else ""
+        text += f"{i+1}. {title} — {t['market']}{outcome_str}\n"
+        keyboard.append([InlineKeyboardButton(f"❌ Stop #{i+1}", callback_data=f"stop_{i}")])
+    
+    keyboard.append([InlineKeyboardButton("🛑 Stop All", callback_data="stopall")])
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def stopall_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_chat.id
+    trackers.clear_all(uid)
+    await update.message.reply_text("🛑 All trackers stopped. You can start new ones anytime!")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Welcome to the 1xBet Live Bot! Type /live to start or just type a match name to track!")
+    await update.message.reply_text(
+        "👋 Welcome to the 1xBet Live Bot!\n\n"
+        "Commands:\n"
+        "/live — Browse live matches\n"
+        "/trackers — View & stop active trackers\n"
+        "/stopall — Stop all trackers\n\n"
+        "Or just type:\n"
+        "Bucheon vs Daejeon : track total 0.5"
+    )
 
 import os
 import threading
@@ -306,20 +360,21 @@ def main():
     
     # Start health check server for Render
     threading.Thread(target=start_health_server, daemon=True).start()
+
+    async def post_init(application):
+        """Called after the Application has been initialized — safe to create tasks here."""
+        asyncio.create_task(poll_trackers(application))
         
-    app = ApplicationBuilder().token(Config.TELEGRAM_BOT_TOKEN).build()
+    app = ApplicationBuilder().token(Config.TELEGRAM_BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("live", live))
     app.add_handler(CommandHandler("odds", odds_command))
+    app.add_handler(CommandHandler("trackers", list_trackers))
+    app.add_handler(CommandHandler("stopall", stopall_command))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_freetext))
     
     logger.info("Bot starting...")
-    
-    # Run the tracker background loop
-    loop = asyncio.get_event_loop()
-    loop.create_task(poll_trackers(app))
-    
     app.run_polling()
 
 if __name__ == "__main__":
