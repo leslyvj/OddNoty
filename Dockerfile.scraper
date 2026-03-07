@@ -1,0 +1,26 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies (needed for httpx/crypto etc)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements from both worker and scrapers to be safe
+COPY worker/requirements.txt ./requirements_worker.txt
+COPY scrapers/requirements.txt ./requirements_scrapers.txt
+
+RUN pip install --no-cache-dir -r requirements_worker.txt
+RUN pip install --no-cache-dir -r requirements_scrapers.txt
+
+# Copy everything
+COPY . .
+
+# Set Python path to find the scraper modules
+ENV PYTHONPATH=/app
+
+# Default port for Render
+ENV PORT=10000
+
+CMD ["python", "scrapers/cloud_entry.py"]
