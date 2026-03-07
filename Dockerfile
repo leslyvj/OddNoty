@@ -23,4 +23,4 @@ ENV PYTHONIOENCODING=utf-8
 ENV PORT=10000
 
 # Entry point for the Cloud Bot
-CMD ["python", "scrapers/cloud_entry.py"]
+CMD ["python", "oddnoty_bot/bot.py"]
