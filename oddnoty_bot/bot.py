@@ -71,7 +71,7 @@ async def poll_trackers(app):
                 minute = '?'
                 match_score = '?'
                 
-            has_movement = False
+            has_raise = False
             lines = []
             
             for oc in outcomes_to_check:
@@ -87,26 +87,26 @@ async def poll_trackers(app):
                 except:
                     current_implied = 0.0
                 
-                if diff_val != 0.0:
-                    has_movement = True
+                # USER REQUEST: Only send update when there is a raise in the odds (diff_val > 0)
+                if diff_val > 0.0:
+                    has_raise = True
                     prev_odd = round(current_odd - diff_val, 3)
                     prev_implied = round((1 / prev_odd) * 100, 1) if prev_odd > 0 else 0
+                    
+                    # Fetch trajectory for the LLM note
+                    traj = store.get_trajectory(mid, market, oc, n=6)
+                    llm_note = await analyst.analyze_raise(market, oc, current_odd, diff_val, traj)
+                    
                     lines.append(
-                        f"{oc}: {prev_odd} → {current_odd}  {o_data['movement_icon']} ({diff_val:+.2f})  [{o_data['velocity_label']}]\n"
-                        f"Implied: {prev_implied}% → {current_implied}%"
-                    )
-                else:
-                    lines.append(
-                        f"{oc}: {current_odd}  ─  [STABLE]\n"
-                        f"Implied: {current_implied}%"
+                        f"{oc}: {prev_odd} → {current_odd}  📈 (+{diff_val:.2f})  [{o_data['velocity_label']}]\n"
+                        f"Implied: {prev_implied}% → {current_implied}%\n"
+                        f"{llm_note}"
                     )
             
-            if lines:
+            # Send message ONLY if there was a raise
+            if lines and has_raise:
                 header = f"📊 {title}\n⏱ {minute}' | Score: {match_score} | {market}"
-                if has_movement:
-                    rep = header + "\n" + "\n".join(lines)
-                else:
-                    rep = header + "\n" + "\n".join(lines) + "\n📡 No movement this cycle."
+                rep = header + "\n" + "\n\n".join(lines)
                     
                 try:
                     await app.bot.send_message(chat_id=uid, text=rep)

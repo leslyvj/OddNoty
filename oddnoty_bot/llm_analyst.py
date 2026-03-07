@@ -9,10 +9,37 @@ class LLMAnalyst:
         self.groq_api_key = Config.GROQ_API_KEY
         self.gemini_api_key = Config.GEMINI_API_KEY
         
-    async def analyze(self, match_context: Dict[str, Any], odds_movement: Dict[str, Any], odds_store=None) -> str:
         if not self.groq_api_key and not self.gemini_api_key:
             return "❌ LLM keys not configured. Check config."
             
+    async def analyze_raise(self, market: str, outcome: str, current_odd: float, diff_val: float, trajectory: list) -> str:
+        """Generates a brief LLM note on how long it took an odd to reach its current raised level."""
+        if not trajectory or len(trajectory) < 2:
+            return "🤖 LLM Note: Not enough historical trajectory to measure the time span of this raise."
+            
+        # The trajectory is sorted latest to oldest by mins_ago
+        # e.g., [{'mins_ago': 0.0, 'odd': 1.8}, {'mins_ago': 0.5, 'odd': 1.7}, ...]
+        first_pt = trajectory[-1]
+        last_pt = trajectory[0]
+        
+        time_span_mins = first_pt['mins_ago'] - last_pt['mins_ago']
+        if time_span_mins <= 0:
+            time_span_mins = 0.5 # fallback assumption of 1 polling cycle
+            
+        start_odd = first_pt['odd']
+        
+        # Assess speed of the odd growth
+        speed = diff_val / time_span_mins
+        if speed > 0.15:
+            pace = "extremely rapidly (sharp money movement)"
+        elif speed > 0.05:
+            pace = "steadily"
+        else:
+            pace = "slowly over time"
+            
+        return f"🤖 **LLM Note**: Odd climbed from **{start_odd} to {current_odd}**. It took approx **{time_span_mins:.1f} mins** to reach this level, moving {pace}."
+
+    async def analyze(self, match_context: Dict[str, Any], odds_movement: Dict[str, Any], odds_store=None) -> str:
         team_h = match_context.get('home_team', 'Home')
         team_a = match_context.get('away_team', 'Away')
         score = match_context.get('score', '0-0')
