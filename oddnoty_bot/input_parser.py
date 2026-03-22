@@ -61,9 +61,14 @@ def parse_track_command(text: str) -> dict[str, Any] | None:
         return None
 
     # 2. Extract target_team
-    m_team = re.search(r'\bteam_?(1|2)\b', rest)
+    team_ptrn = r'\b(?:team|side)\s*[_\-\s]?(1|2)\b'
+    m_team = re.search(team_ptrn, rest)
     if m_team:
         intent["target_team"] = int(m_team.group(1))
+    elif re.search(r'\b(home|host|hometeam|team_?1)\b', rest):
+        intent["target_team"] = 1
+    elif re.search(r'\b(away|guest|visitor|awayteam|team_?2)\b', rest):
+        intent["target_team"] = 2
         
     # 3. Extract side
     if re.search(r'\bover\b', rest):
@@ -84,7 +89,10 @@ def parse_track_command(text: str) -> dict[str, Any] | None:
         found_market = True
         
     # 5. Extract market_line securely
-    rest_clean = re.sub(r'\bteam_?[12]\b', '', rest)
+    # Remove team designations so numbers like "1" in "Team 1" aren't caught as lines
+    rest_clean = re.sub(team_ptrn, '', rest)
+    rest_clean = re.sub(r'\b(home|host|hometeam|away|guest|visitor|awayteam|team_?[12])\b', '', rest_clean)
+    
     m_line = re.search(r'\b(\d+\.\d+|\d+)\b', rest_clean)
     if m_line:
         intent["market_line"] = float(m_line.group(1))

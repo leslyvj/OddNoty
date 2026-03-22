@@ -6,6 +6,16 @@ from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+def normalize_line(val: Any) -> str:
+    """Normalizes a line value to string, removing .0 if it's an integer."""
+    try:
+        f = float(val)
+        if f == int(f):
+            return str(int(f))
+        return str(f)
+    except:
+        return str(val)
+
 class OneXBetScraper:
     def __init__(self):
         self.mirrors = [
@@ -124,28 +134,30 @@ class OneXBetScraper:
                                     
                                     # Very simplified mapping logic for MVP
                                     # T: 9 (Over), T: 10 (Under) - for generic market, P serves as line
+                                    line_str = normalize_line(p) if p is not None else ""
+                                    
                                     if t == 9 and p is not None:
-                                        market = f"Over/Under {p}"
+                                        market = f"Over/Under {line_str}"
                                         if market not in odds_data["markets"]: odds_data["markets"][market] = {}
                                         odds_data["markets"][market]["Over"] = c
                                     elif t == 10 and p is not None:
-                                        market = f"Over/Under {p}"
+                                        market = f"Over/Under {line_str}"
                                         if market not in odds_data["markets"]: odds_data["markets"][market] = {}
                                         odds_data["markets"][market]["Under"] = c
                                     elif t == 11 and p is not None:
-                                        market = f"Team 1 Total {p}"
+                                        market = f"Team 1 Total {line_str}"
                                         if market not in odds_data["markets"]: odds_data["markets"][market] = {}
                                         odds_data["markets"][market]["Over"] = c
                                     elif t == 12 and p is not None:
-                                        market = f"Team 1 Total {p}"
+                                        market = f"Team 1 Total {line_str}"
                                         if market not in odds_data["markets"]: odds_data["markets"][market] = {}
                                         odds_data["markets"][market]["Under"] = c
                                     elif t == 13 and p is not None:
-                                        market = f"Team 2 Total {p}"
+                                        market = f"Team 2 Total {line_str}"
                                         if market not in odds_data["markets"]: odds_data["markets"][market] = {}
                                         odds_data["markets"][market]["Over"] = c
                                     elif t == 14 and p is not None:
-                                        market = f"Team 2 Total {p}"
+                                        market = f"Team 2 Total {line_str}"
                                         if market not in odds_data["markets"]: odds_data["markets"][market] = {}
                                         odds_data["markets"][market]["Under"] = c
                         

@@ -59,6 +59,31 @@ Answer:"""
         result = await self._call_llm(prompt, temperature=0.0)
         return result.strip().strip('"')
 
+    async def parse_track_intent(self, user_text: str, available_markets: List[str]) -> Dict[str, Any]:
+        """Uses LLM to extract structured tracking intent from free-text."""
+        import json
+        prompt = f"""You are a sports betting expert. A user wants to track a 1xBet market.
+User Message: "{user_text}"
+Available Markets: {available_markets}
+
+Extract:
+1. matched_market: Exact market name from the list (e.g., "Team 1 Total 1.5"). Return "UNKNOWN" if no match.
+2. outcome: "Over" or "Under" or null.
+3. target_odd: Float or null.
+
+Return ONLY valid JSON.
+JSON:"""
+        result = await self._call_llm(prompt, temperature=0.0)
+        try:
+            # Basic cleanup for JSON
+            cleaned = result.strip()
+            if "```json" in cleaned:
+                cleaned = cleaned.split("```json")[-1].split("```")[0].strip()
+            return json.loads(cleaned)
+        except Exception as e:
+            logger.error(f"Failed to parse LLM intent JSON: {e} | Raw: {result}")
+            return {"matched_market": "UNKNOWN", "outcome": None, "target_odd": None}
+
     async def summarize_hourly_movements(self, match_title: str, trajectory_data: Dict[str, List[Dict[str, Any]]]) -> str:
         """Generates a summary of all odd movements for a match over the last hour."""
         if not trajectory_data:

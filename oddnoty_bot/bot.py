@@ -2,6 +2,7 @@ import asyncio
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from typing import Any
 
 from oddnoty_bot.config import Config
 from oddnoty_bot.onexbet_scraper import OneXBetScraper
@@ -18,6 +19,15 @@ scraper = OneXBetScraper()
 store = OddsStore()
 analyst = LLMAnalyst()
 trackers = TrackerManager()
+
+def normalize_line(val: Any) -> str:
+    try:
+        f = float(val)
+        if f == int(f):
+            return str(int(f))
+        return str(f)
+    except:
+        return str(val)
 
 async def poll_trackers(app):
     while True:
@@ -175,60 +185,48 @@ async def handle_freetext(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store.snapshot(match_id, odds_data)
     available_markets = list(odds_data.get('markets', {}).keys())
     
-    # Use market_group from the intent (already derived by input_parser)
-    market_group = intent.get('market_group')
-    target_market_prefix = market_group
+    # NEW: Use LLM Brain for accurate market and intent detection
+    msg_resolving = await update.message.reply_text("🔍 Analyzing market data with LLM...")
+    llm_intent = await analyst.parse_track_intent(text, available_markets)
+    await msg_resolving.delete()
     
-    if target_market_prefix and intent['market_line'] is not None:
-        target_market_prefix += f" {intent['market_line']}"
-            
-    matched_market = None
-    if target_market_prefix:
-        for am in available_markets:
-            if am == target_market_prefix or am.startswith(f"{target_market_prefix} "):
-                matched_market = am
-                break
-                
-    if not matched_market and intent.get('market_unknown'):
-        msg_resolving = await update.message.reply_text("🔍 Using LLM to identify your specified market...")
-        matched_market = await analyst.resolve_market(intent['raw_market_query'], available_markets)
-        if matched_market == "UNKNOWN" or matched_market not in available_markets:
-            matched_market = None
-        await msg_resolving.delete()
-
-    if not matched_market:
-        # Filter suggestions to only show markets from the relevant group
-        if market_group:
-            relevant = [m for m in available_markets if m.startswith(market_group)]
-        else:
-            relevant = available_markets
-        suggested = " / ".join(relevant[:6]) if relevant else " / ".join(available_markets[:5])
-        if not suggested: suggested = "None available right now"
+    matched_market = llm_intent.get('matched_market')
+    if matched_market == "UNKNOWN" or matched_market not in available_markets:
+        # Fallback to simple suggestions if LLM fails
+        suggested = " / ".join(available_markets[:5])
         await update.message.reply_text(
-            f"Got {home_team} vs {away_team} but couldn't identify the market — did you mean: {suggested}?"
+            f"Got {home_team} vs {away_team} but couldn't identify the specific market — did you mean: {suggested}?"
         )
         return
         
+    outcome = llm_intent.get('outcome')
+    target_odd = llm_intent.get('target_odd')
+    
     market_odds = odds_data['markets'][matched_market]
     over_odd = market_odds.get('Over', market_odds.get('1', 'N/A'))
     under_odd = market_odds.get('Under', market_odds.get('2', 'N/A'))
     
-    msg_text = f"Found: {home_team} vs {away_team} | Tracking {matched_market} | Over: {over_odd} | Under: {under_odd}"
-    if intent.get('target_odd'):
-        msg_text += f"\n🎯 **Target Odd set to: {intent['target_odd']}**"
+    msg_text = f"✅ Match found: **{home_team} vs {away_team}**\nTracking: **{matched_market}**\n"
+    if outcome:
+        msg_text += f"Side: **{outcome}** | Current: **{market_odds.get(outcome, 'N/A')}**\n"
+    else:
+        msg_text += f"Current: **Over {over_odd} / Under {under_odd}**\n"
+        
+    if target_odd:
+        msg_text += f"🎯 **Target Odd: {target_odd}**"
     
     context.user_data['pending_tracker'] = {
         "match_id": match_id,
         "market": matched_market,
-        "outcome": intent['side'], # can be None
-        "target_odd": intent.get('target_odd')
+        "outcome": outcome,
+        "target_odd": target_odd
     }
     
     keyboard = [
-        [InlineKeyboardButton("✅ Confirm", callback_data="confirm_track"),
+        [InlineKeyboardButton("✅ Confirm Tracking", callback_data="confirm_track"),
          InlineKeyboardButton("❌ Cancel", callback_data="cancel_track")]
     ]
-    await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def live(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("⏳ Fetching live matches from 1xBet...")
