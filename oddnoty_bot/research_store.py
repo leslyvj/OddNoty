@@ -93,3 +93,15 @@ class ResearchStore:
             """, (match_id, threshold))
             row = cursor.fetchone()
             return row[0] if row else None
+    def get_match(self, match_id: str) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT home_team, away_team, sofascore_id, onexbet_id FROM matches WHERE match_id = ?", (match_id,))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "home_team": row[0],
+                    "away_team": row[1],
+                    "sofascore_id": row[2],
+                    "onexbet_id": row[3]
+                }
+            return None

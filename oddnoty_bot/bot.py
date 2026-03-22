@@ -26,20 +26,21 @@ store = ResearchStore()
 async def health_check(request):
     return web.Response(text="OK")
 
-async def handle_freetext(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (rest of the handle_freetext remains same)
-    text = getattr(update.message, 'text', '')
-    if not text or text.startswith('/'): return
+async def run_research(match_id, home, away, update_or_query):
+    """Helper to run/refresh research and send/update messages."""
+    is_callback = isinstance(update_or_query, CallbackQueryHandler) # Not quite right, check type
     
-    intent = parse_track_command(text)
-    if not intent:
-        return
-        
-    home, away = intent['team1'], intent['team2']
-    match_id = store.save_match(home, away)
-    
-    msg_resolving = await update.message.reply_text(f"🔍 Starting deep research for **{home} vs {away}**...\nGathering data from SofaScore & 1xBet...", parse_mode="Markdown")
-    
+    # We use context and update differently depending on if it's a message or callback
+    if hasattr(update_or_query, 'message'):
+        # It's an Update
+        update = update_or_query
+        target_msg = await update.message.reply_text(f"🔍 Refreshing research for **{home} vs {away}**...", parse_mode="Markdown")
+    else:
+        # It's a CallbackQuery
+        query = update_or_query
+        await query.answer("Refreshing stats...")
+        target_msg = await query.message.reply_text(f"🔄 **Updating stats for {home} vs {away}...**", parse_mode="Markdown")
+
     try:
         sofa_id = await sofa.search_match(home, away)
         sofa_data = {}
@@ -58,17 +59,57 @@ async def handle_freetext(update: Update, context: ContextTypes.DEFAULT_TYPE):
         report = await analyst.generate_research_report(f"{home} vs {away}", raw_combined)
         store.save_report(match_id, report)
         
-        await msg_resolving.delete()
+        # Success! Prepare UI
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Refresh Stats", callback_data=f"refresh:{match_id}")]
+        ])
+        
+        await target_msg.delete()
         
         if len(report) > 4000:
-            for i in range(0, len(report), 4000):
-                await update.message.reply_text(report[i:i+4000], parse_mode="Markdown")
+            chunks = [report[i:i+4000] for i in range(0, len(report), 4000)]
+            for i, chunk in enumerate(chunks):
+                # Only add keyboard to the last chunk
+                reply_markup = keyboard if i == len(chunks) - 1 else None
+                if hasattr(update_or_query, 'message'):
+                    await update_or_query.message.reply_text(chunk, parse_mode="Markdown", reply_markup=reply_markup)
+                else:
+                    await update_or_query.message.reply_text(chunk, parse_mode="Markdown", reply_markup=reply_markup)
         else:
-            await update.message.reply_text(report, parse_mode="Markdown")
-            
+            if hasattr(update_or_query, 'message'):
+                await update_or_query.message.reply_text(report, parse_mode="Markdown", reply_markup=keyboard)
+            else:
+                await update_or_query.message.reply_text(report, parse_mode="Markdown", reply_markup=keyboard)
+                
     except Exception as e:
-        logger.error(f"Research error: {e}")
-        await msg_resolving.edit_text(f"❌ Research failed: {str(e)}")
+        logger.error(f"Refresh error: {e}")
+        await target_msg.edit_text(f"❌ Refresh failed: {str(e)}")
+
+async def handle_freetext(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = getattr(update.message, 'text', '')
+    if not text or text.startswith('/'): return
+    
+    intent = parse_track_command(text)
+    if not intent:
+        return
+        
+    home, away = intent['team1'], intent['team2']
+    match_id = store.save_match(home, away)
+    
+    await run_research(match_id, home, away, update)
+
+async def refresh_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
+    if not data.startswith("refresh:"): return
+    
+    match_id = data.split(":", 1)[1]
+    match = store.get_match(match_id)
+    if not match:
+        await query.answer("Match data not found in database.", show_alert=True)
+        return
+        
+    await run_research(match_id, match['home_team'], match['away_team'], query)
 
 async def research_refresh_loop():
     while True:
@@ -80,6 +121,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🧠 **OddNoty Deep Research Bot**\n\n"
         "Just type a match name (e.g., `Arsenal vs Manchester City`) "
         "and I will generate a comprehensive pre-match research report with betting recommendations.\n\n"
+        "Refresh the stats anytime using the button below the report!\n\n"
         "Priority data: **SofaScore**\n"
         "Odds & Markets: **1xBet**",
         parse_mode="Markdown"
@@ -101,13 +143,13 @@ def main():
         return
     
     async def post_init(application):
-        # Clear any existing webhooks to avoid conflicts on restart
         await application.bot.delete_webhook(drop_pending_updates=True)
         asyncio.create_task(research_refresh_loop())
         asyncio.create_task(run_health_server())
         
     app = ApplicationBuilder().token(Config.TELEGRAM_BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(refresh_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_freetext))
     
     logger.info("Deep Research Bot starting...")
