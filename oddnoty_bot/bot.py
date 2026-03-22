@@ -91,6 +91,10 @@ async def poll_trackers(app):
                     if last_odd is None or last_odd < target_odd:
                         reached_target = True
 
+                # USER REQUEST: Only send message when there is change in odds
+                if not reached_target and last_odd is not None and current_odd == last_odd:
+                    continue
+
                 try:
                     current_implied = float(str(o_data['implied_prob']).strip('%'))
                 except:
