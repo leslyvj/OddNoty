@@ -145,6 +145,16 @@ async def handle_freetext(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     match = find_match(intent['team1'], intent['team2'], matches)
     
+    # If not found in live, try pre-match
+    if not match:
+        logger.info(f"Match {intent['team1']} vs {intent['team2']} not found in live. Trying pre-match...")
+        pre_matches = list(scraper.prematch_matches_cache.values())
+        if not pre_matches:
+            pre_matches = await scraper.get_prematch_matches()
+        match = find_match(intent['team1'], intent['team2'], pre_matches)
+        if match:
+            logger.info(f"Found pre-match: {match['home_team']} vs {match['away_team']}")
+    
     if not match:
         await update.message.reply_text(f"❌ Couldn't find a live match for {intent['team1']} vs {intent['team2']}.")
         return
@@ -398,6 +408,16 @@ async def hourly_summary_loop(app):
                 except Exception as e:
                     logger.error(f"Failed to send hourly summary to {uid}: {e}")
 
+async def prematch_refresh_loop(app):
+    """Refreshes pre-match matches cache every 30 minutes."""
+    while True:
+        logger.info("Refreshing pre-match matches cache...")
+        try:
+            await scraper.get_prematch_matches()
+        except Exception as e:
+            logger.error(f"Failed to refresh pre-match matches: {e}")
+        await asyncio.sleep(1800) # 30 minutes
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Welcome to the 1xBet Live Bot!\n\n"
@@ -440,6 +460,7 @@ def main():
         """Called after the Application has been initialized — safe to create tasks here."""
         asyncio.create_task(poll_trackers(application))
         asyncio.create_task(hourly_summary_loop(application))
+        asyncio.create_task(prematch_refresh_loop(application))
         
     app = ApplicationBuilder().token(Config.TELEGRAM_BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))

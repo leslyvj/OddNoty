@@ -22,6 +22,7 @@ class OneXBetScraper:
             "Connection": "keep-alive"
         }
         self.live_matches_cache = {}
+        self.prematch_matches_cache = {}
 
     def _get_random_mirror(self):
         return random.choice(self.mirrors)
@@ -45,7 +46,8 @@ class OneXBetScraper:
                                 "away_team": item.get("O2"),
                                 "league": item.get("LE"),
                                 "score": f"{fs.get('S1', 0)}-{fs.get('S2', 0)}",
-                                "minute": item.get("SC", {}).get("TS", 0) // 60
+                                "minute": item.get("SC", {}).get("TS", 0) // 60,
+                                "is_live": True
                             })
                             self.live_matches_cache[match_id] = parsed[-1]
                         return parsed
@@ -53,14 +55,50 @@ class OneXBetScraper:
                 logger.error(f"Live matches fetch failed for mirror {mirror}: {e}")
         return list(self.live_matches_cache.values())
 
-    async def get_match_odds(self, match_id: str) -> Dict[str, Any]:
+    async def get_prematch_matches(self) -> List[Dict[str, Any]]:
+        """Fetches top upcoming matches (Line) from 1xBet."""
         for mirror in self.mirrors:
-            url = f"{mirror}/service-api/LiveFeed/GetGameZip"
+            url = f"{mirror}/service-api/LineFeed/Get1x2_VZip"
+            params = {"sports": 1, "count": 100, "lng": "en", "mode": 4, "partner": 71}
+            try:
+                async with httpx.AsyncClient(headers=self.headers, timeout=15.0) as client:
+                    response = await client.get(url, params=params)
+                    if response.status_code == 200:
+                        data = response.json().get("Value", [])
+                        parsed = []
+                        for item in data:
+                            match_id = str(item.get("I"))
+                            parsed.append({
+                                "match_id": match_id,
+                                "home_team": item.get("O1"),
+                                "away_team": item.get("O2"),
+                                "league": item.get("LE"),
+                                "score": "pre-match",
+                                "minute": "Not started",
+                                "is_live": False
+                            })
+                            self.prematch_matches_cache[match_id] = parsed[-1]
+                        return parsed
+            except Exception as e:
+                logger.error(f"Pre-match matches fetch failed for mirror {mirror}: {e}")
+        return list(self.prematch_matches_cache.values())
+
+    async def get_match_odds(self, match_id: str) -> Dict[str, Any]:
+        # Determine if it's a live or pre-match game
+        is_live = match_id in self.live_matches_cache
+        base_endpoint = "LiveFeed" if is_live else "LineFeed"
+
+        for mirror in self.mirrors:
+            url = f"{mirror}/service-api/{base_endpoint}/GetGameZip"
             params = {"id": match_id, "lng": "en", "isSubGames": "true", "GroupEvents": "true", "countevents": 500}
+            
+            # If LineFeed, we might need a backup check if LiveFeed fails
+            # (sometimes games move from Line to Live)
             
             odds_data = {
                 "match_id": match_id,
-                "markets": {}
+                "markets": {},
+                "is_live": is_live
             }
             
             try:
@@ -68,7 +106,14 @@ class OneXBetScraper:
                     response = await client.get(url, params=params)
                     if response.status_code == 200:
                         data = response.json().get("Value", {})
-                        
+                        if not data:
+                            # Try other endpoint if this one gave nothing
+                            alt_endpoint = "LineFeed" if is_live else "LiveFeed"
+                            url_alt = f"{mirror}/service-api/{alt_endpoint}/GetGameZip"
+                            response = await client.get(url_alt, params=params)
+                            data = response.json().get("Value", {}) if response.status_code == 200 else {}
+                            if data: odds_data["is_live"] = not is_live
+
                         # Loop through Group Events where the granular odds are nested
                         for group in data.get("GE", []):
                             for event_list in group.get("E", []):
@@ -103,7 +148,9 @@ class OneXBetScraper:
                                         market = f"Team 2 Total {p}"
                                         if market not in odds_data["markets"]: odds_data["markets"][market] = {}
                                         odds_data["markets"][market]["Under"] = c
-                        return odds_data # Only return when successful
+                        
+                        if odds_data["markets"]:
+                            return odds_data 
             except Exception as e:
                 logger.error(f"Game odds fetch failed for mirror {mirror}: {e}")
                 
