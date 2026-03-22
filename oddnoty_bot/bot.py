@@ -111,6 +111,30 @@ async def refresh_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     await run_research(match_id, match['home_team'], match['away_team'], query)
 
+async def refresh_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles /refresh team1 vs team2"""
+    text = " ".join(context.args)
+    if not text:
+        await update.message.reply_text("Please provide match teams, e.g., `/refresh Arsenal vs Man City`", parse_mode="Markdown")
+        return
+        
+    intent = parse_track_command(text)
+    if not intent or not intent['team1']:
+        await update.message.reply_text("Could not parse teams. Use: `/refresh Team A vs Team B`", parse_mode="Markdown")
+        return
+        
+    home, away = intent['team1'], intent['team2']
+    match_id = f"{home}_{away}".lower().replace(" ", "")
+    
+    # Check if we have this match
+    match = store.get_match(match_id)
+    if not match:
+        await update.message.reply_text(f"No existing research found for **{home} vs {away}**. Starting a new one...", parse_mode="Markdown")
+        # Proceed anyway as new research
+        match_id = store.save_match(home, away)
+        
+    await run_research(match_id, home, away, update)
+
 async def research_refresh_loop():
     while True:
         await asyncio.sleep(600)
@@ -120,8 +144,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🧠 **OddNoty Deep Research Bot**\n\n"
         "Just type a match name (e.g., `Arsenal vs Manchester City`) "
-        "and I will generate a comprehensive pre-match research report with betting recommendations.\n\n"
-        "Refresh the stats anytime using the button below the report!\n\n"
+        "and I will generate a comprehensive pre-match research report.\n\n"
+        "**Commands:**\n"
+        "🔹 `/refresh Team A vs Team B` - Get latest live stats/odds for a match.\n\n"
         "Priority data: **SofaScore**\n"
         "Odds & Markets: **1xBet**",
         parse_mode="Markdown"
@@ -149,6 +174,7 @@ def main():
         
     app = ApplicationBuilder().token(Config.TELEGRAM_BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("refresh", refresh_command))
     app.add_handler(CallbackQueryHandler(refresh_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_freetext))
     
