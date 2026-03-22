@@ -11,8 +11,16 @@ def parse_track_command(text: str) -> dict[str, Any] | None:
         "market_type": None,
         "market_line": None,
         "side": None,
-        "market_group": None  # "Over/Under", "Team 1 Total", "Team 2 Total"
+        "market_group": None,  # "Over/Under", "Team 1 Total", "Team 2 Total"
+        "target_odd": None
     }
+    
+    # Extract Target Odd (e.g., "Target: 1.80" or "odd 1.8")
+    m_target = re.search(r'\b(?:target|odd)\s*:?\s*(\d+\.\d+|\d+)\b', text)
+    if m_target:
+        intent["target_odd"] = float(m_target.group(1))
+        # Remove target part from rest to avoid confusion with market line
+        text = text[:m_target.start()] + text[m_target.end():]
     
     # 1. Split teams from the rest of the intent
     if "track " in text:

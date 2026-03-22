@@ -83,9 +83,13 @@ async def poll_trackers(app):
                 current_odd = o_data['odd']
                 last_odd = t.get('last_notified_odd')
                 
-                # USER REQUEST: Only send message when there is change in odds
-                if last_odd is not None and current_odd == last_odd:
-                    continue
+                # USER REQUEST: Track target odd
+                target_odd = t.get('target_odd')
+                reached_target = False
+                if target_odd and current_odd >= target_odd:
+                    # Only send "reached" once per hit
+                    if last_odd is None or last_odd < target_odd:
+                        reached_target = True
 
                 try:
                     current_implied = float(str(o_data['implied_prob']).strip('%'))
@@ -94,17 +98,27 @@ async def poll_trackers(app):
                 
                 has_raise = True
                 prev_odd = round(current_odd - diff_val, 3)
-                prev_implied = round((1 / prev_odd) * 100, 1) if prev_odd > 0 else 0
+                
+                status_icon = '📈' if current_odd > (last_odd or prev_odd) else '📉'
+                if reached_target:
+                    status_icon = '🎯'
+                    
+                line = f"{oc}: {prev_odd if last_odd is None else last_odd} → {current_odd} {status_icon} ({diff_val:+.2f}) [{o_data['velocity_label']}]\n"
+                line += f"Implied: {current_implied}%\n"
+                
+                if target_odd and not reached_target:
+                    dist = round(target_odd - current_odd, 3)
+                    if dist > 0:
+                        line += f"📍 Need **+{dist:.2f}** more to reach target **{target_odd}**\n"
+                elif reached_target:
+                    line = f"🎯 **TARGET REACHED!** 🎯\n{line}"
+                    line += f"🚀 The odd has hit your target of **{target_odd}**!"
                 
                 # Fetch trajectory for the LLM note
                 traj = store.get_trajectory(mid, market, oc, n=6)
                 llm_note = await analyst.analyze_raise(market, oc, current_odd, diff_val, traj)
-                
-                lines.append(
-                    f"{oc}: {prev_odd if last_odd is None else last_odd} → {current_odd} {'📈' if current_odd > (last_odd or prev_odd) else '📉'} ({diff_val:+.2f}) [{o_data['velocity_label']}]\n"
-                    f"Implied: {current_implied}%\n"
-                    f"{llm_note}"
-                )
+
+                lines.append(line + f"\n{llm_note}")
                 t['last_notified_odd'] = current_odd
             
             # Send message if there were changes
@@ -186,11 +200,14 @@ async def handle_freetext(update: Update, context: ContextTypes.DEFAULT_TYPE):
     under_odd = market_odds.get('Under', market_odds.get('2', 'N/A'))
     
     msg_text = f"Found: {home_team} vs {away_team} | Tracking {matched_market} | Over: {over_odd} | Under: {under_odd}"
+    if intent.get('target_odd'):
+        msg_text += f"\n🎯 **Target Odd set to: {intent['target_odd']}**"
     
     context.user_data['pending_tracker'] = {
         "match_id": match_id,
         "market": matched_market,
-        "outcome": intent['side'] # can be None
+        "outcome": intent['side'], # can be None
+        "target_odd": intent.get('target_odd')
     }
     
     keyboard = [
@@ -281,7 +298,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "confirm_track":
         t_args = context.user_data.get('pending_tracker')
         if t_args:
-            trackers.add_tracker(update.effective_chat.id, t_args['match_id'], t_args['market'], t_args['outcome'])
+            trackers.add_tracker(
+                update.effective_chat.id, 
+                t_args['match_id'], 
+                t_args['market'], 
+                t_args['outcome'],
+                target_odd=t_args.get('target_odd', 0.0)
+            )
             await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=query.message.id, text=f"✅ Now tracking {t_args['market']}!")
         else:
             await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=query.message.id, text="❌ Tracker session expired.")
