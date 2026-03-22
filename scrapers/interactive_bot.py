@@ -78,7 +78,7 @@ class OddTrackerEngine:
                                 alert = {
                                     "home_team": match_info['home_team'],
                                     "away_team": match_info['away_team'],
-                                    "match_minute": timestamp,
+                                    "match_minute": match_info.get("match_minute", timestamp),
                                     "score": match_info['score'],
                                     "market": f"Team {team_num} Total Over {line}",
                                     "line": f"Odd Updated: {current_odd}",

@@ -81,30 +81,34 @@ async def poll_trackers(app):
                     
                 diff_val = o_data.get('diff', 0.0)
                 current_odd = o_data['odd']
+                last_odd = t.get('last_notified_odd')
                 
+                # USER REQUEST: Only send message when there is change in odds
+                if last_odd is not None and current_odd == last_odd:
+                    continue
+
                 try:
                     current_implied = float(str(o_data['implied_prob']).strip('%'))
                 except:
                     current_implied = 0.0
                 
-                # USER REQUEST: Only send update when there is a raise in the odds (diff_val > 0)
-                if diff_val > 0.0:
-                    has_raise = True
-                    prev_odd = round(current_odd - diff_val, 3)
-                    prev_implied = round((1 / prev_odd) * 100, 1) if prev_odd > 0 else 0
-                    
-                    # Fetch trajectory for the LLM note
-                    traj = store.get_trajectory(mid, market, oc, n=6)
-                    llm_note = await analyst.analyze_raise(market, oc, current_odd, diff_val, traj)
-                    
-                    lines.append(
-                        f"{oc}: {prev_odd} → {current_odd}  📈 (+{diff_val:.2f})  [{o_data['velocity_label']}]\n"
-                        f"Implied: {prev_implied}% → {current_implied}%\n"
-                        f"{llm_note}"
-                    )
+                has_raise = True
+                prev_odd = round(current_odd - diff_val, 3)
+                prev_implied = round((1 / prev_odd) * 100, 1) if prev_odd > 0 else 0
+                
+                # Fetch trajectory for the LLM note
+                traj = store.get_trajectory(mid, market, oc, n=6)
+                llm_note = await analyst.analyze_raise(market, oc, current_odd, diff_val, traj)
+                
+                lines.append(
+                    f"{oc}: {prev_odd if last_odd is None else last_odd} → {current_odd} {'📈' if current_odd > (last_odd or prev_odd) else '📉'} ({diff_val:+.2f}) [{o_data['velocity_label']}]\n"
+                    f"Implied: {current_implied}%\n"
+                    f"{llm_note}"
+                )
+                t['last_notified_odd'] = current_odd
             
-            # Send message ONLY if there was a raise
-            if lines and has_raise:
+            # Send message if there were changes
+            if lines:
                 header = f"📊 {title}\n⏱ {minute}' | Score: {match_score} | {market}"
                 rep = header + "\n" + "\n\n".join(lines)
                     
@@ -157,6 +161,13 @@ async def handle_freetext(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 matched_market = am
                 break
                 
+    if not matched_market and intent.get('market_unknown'):
+        msg_resolving = await update.message.reply_text("🔍 Using LLM to identify your specified market...")
+        matched_market = await analyst.resolve_market(intent['raw_market_query'], available_markets)
+        if matched_market == "UNKNOWN" or matched_market not in available_markets:
+            matched_market = None
+        await msg_resolving.delete()
+
     if not matched_market:
         # Filter suggestions to only show markets from the relevant group
         if market_group:
@@ -323,6 +334,47 @@ async def stopall_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     trackers.clear_all(uid)
     await update.message.reply_text("🛑 All trackers stopped. You can start new ones anytime!")
 
+async def hourly_summary_loop(app):
+    """Summarizes odds changes every hour for active trackers."""
+    while True:
+        await asyncio.sleep(3600)  # Wait 1 hour
+        logger.info("Generating hourly summaries...")
+        all_tracks = trackers.get_all_trackers()
+        if not all_tracks:
+            continue
+
+        # Group by match_id and user
+        match_summaries = {} # {match_id: {title: str, trajectory: {market: [pts]}}}
+        
+        for uid, tlist in all_tracks.items():
+            for t in tlist:
+                if not t.get('active'): continue
+                mid = t['match_id']
+                market = t['market']
+                outcome = t['outcome']
+                
+                if mid not in match_summaries:
+                    mc = scraper.live_matches_cache.get(mid)
+                    title = f"{mc['home_team']} vs {mc['away_team']}" if mc else mid
+                    match_summaries[mid] = {"title": title, "trajectories": {}, "users": set()}
+                
+                match_summaries[mid]["users"].add(uid)
+                
+                # Get trajectory (last hour approx 30 snapshots if polled every 2 mins)
+                traj = store.get_trajectory(mid, market, outcome or "Over", n=30)
+                if traj:
+                    match_summaries[mid]["trajectories"][f"{market} {outcome or ''}"] = traj
+
+        for mid, data in match_summaries.items():
+            if not data["trajectories"]: continue
+            
+            summary_text = await analyst.summarize_hourly_movements(data["title"], data["trajectories"])
+            for uid in data["users"]:
+                try:
+                    await app.bot.send_message(chat_id=uid, text=f"🕒 **Hourly Update**\n\n{summary_text}")
+                except Exception as e:
+                    logger.error(f"Failed to send hourly summary to {uid}: {e}")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Welcome to the 1xBet Live Bot!\n\n"
@@ -364,6 +416,7 @@ def main():
     async def post_init(application):
         """Called after the Application has been initialized — safe to create tasks here."""
         asyncio.create_task(poll_trackers(application))
+        asyncio.create_task(hourly_summary_loop(application))
         
     app = ApplicationBuilder().token(Config.TELEGRAM_BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))

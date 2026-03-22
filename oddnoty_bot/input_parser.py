@@ -64,12 +64,16 @@ def parse_track_command(text: str) -> dict[str, Any] | None:
         intent["side"] = "Under"
         
     # 4. Extract market_type
+    found_market = False
     if re.search(r'\b(total|goals|over|under)\b', rest):
         intent["market_type"] = "over_under"
+        found_market = True
     elif re.search(r'\b(hdp|handicap|ah)\b', rest):
         intent["market_type"] = "asian_handicap"
+        found_market = True
     elif re.search(r'\b(btts|both teams)\b', rest):
         intent["market_type"] = "btts"
+        found_market = True
         
     # 5. Extract market_line securely
     rest_clean = re.sub(r'\bteam_?[12]\b', '', rest)
@@ -89,5 +93,12 @@ def parse_track_command(text: str) -> dict[str, Any] | None:
         intent["market_group"] = "BTTS"
     elif intent["market_type"] == "asian_handicap":
         intent["market_group"] = "Handicap"
+
+    # 7. LLM Fallback flag
+    if not found_market:
+        intent["market_unknown"] = True
+        intent["raw_market_query"] = rest
+    else:
+        intent["market_unknown"] = False
         
     return intent

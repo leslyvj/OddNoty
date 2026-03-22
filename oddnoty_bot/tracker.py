@@ -17,6 +17,7 @@ class TrackerManager:
             "market": market,
             "outcome": outcome,
             "target_odd": target_odd,
+            "last_notified_odd": None,
             "active": True
         })
         logger.info(f"Tracker added for User {user_id}: {market} {outcome} @ {target_odd}")
