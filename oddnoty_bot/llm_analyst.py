@@ -1,5 +1,6 @@
 import logging
 import httpx
+import json
 from typing import Dict, Any, List
 from oddnoty_bot.config import Config
 
@@ -45,6 +46,71 @@ class LLMAnalyst:
                 logger.error(f"Error calling Gemini: {e}")
 
         return "❌ LLM Service unavailable. Please check API keys."
+
+    async def generate_research_report(self, match_name: str, raw_data: Dict[str, Any]) -> str:
+        """Generates a deep pre-match research report using multi-source data."""
+        system_prompt = f"""You are a professional betting analyst and sports data scientist. 
+Do a deep pre-match research report for the football match [{match_name}]. 
+Use ONLY the provided data and your internal high-quality knowledge base to synthesize a professional-grade report.
+
+🎯 RESEARCH GOAL:
+Provide a comprehensive, data-driven analysis that identifies value in betting markets (Team Totals, Asian Handicaps, Match Totals, etc.). The report must be structured PRECISELY as follows:
+
+# {match_name} – Pre‑Match Research Report
+
+## Executive summary
+(A punchy 3-paragraph summary of the match, the key analytical gap between the teams, and the primary betting conclusion based on underlying data vs market prices.)
+
+## A. Match context
+(League position, importance of points for both sides, presence of derbies or rivalries, and environmental context.)
+
+## B. Latest team news
+(Injuries, suspensions, expected lineups, and the tactical impact of missing players. Use the 'lineups' data from SofaScore.)
+
+## C. Team form and scoring profile
+(Detailed breakdown of scored/conceded averages, home/away splits, scoring floor/ceiling, and frequency of BTTS/Over 2.5.)
+
+## D. Tactical and style analysis
+(A breakdown of how each team plays, their shot quality, defensive structure, and how these styles clash.)
+
+## E. Market analysis
+(Comparison of 1xBet odds with statistical probabilities. Discuss 1X2, Totals, and Asian Handicaps. Note any potential 'trap' lines or mispricings.)
+
+## F. Historical matchup analysis
+(Head-to-head history, specific trends at the home venue, and historical goal distributions between these sides.)
+
+## G. Advanced indicators
+(xG, xGA, shot quality, pass accuracy, play concentration, and any other relevant advanced metrics from the provided SofaScore stats.)
+
+## H. Weather, pitch, and external conditions
+(Impact of local conditions, stadium specifics, and any scheduling/travel factors.)
+
+## I. Betting output – actionable angles
+### 1) Best Team Total Over/Under lean
+### 2) Best Asian Handicap lean
+### 3) Confidence levels
+### 4) What would invalidate these picks
+### 5) Best line/price ranges to target
+### 6) Final ranking of top 3 angles
+
+## Limitations and missing data
+(Note any data points that are estimated or where more info would be needed for a perfect assessment.)
+
+---
+
+👉 ANALYTICAL GUIDELINES:
+- Be highly specific. Don't say "good form"; say "Orenburg defends better at home (1.09 conceded) while Spartak concede more away (1.80)".
+- Use the provided JSON data (SofaScore statistics, 1xBet odds) to back every claim.
+- Identify the 'Market consensus' from the 1xBet odds and compare it to the 'Statistical reality' from SofaScore.
+- Tone: Professional, slightly technical, objective, and sharp.
+"""
+
+        # Truncate raw data if too large
+        context_data = json.dumps(raw_data, indent=2)[:15000]
+        
+        prompt = f"Data acquired from SofaScore and 1xBet:\n\n{context_data}\n\nPlease generate the report now."
+        
+        return await self._call_llm(system_prompt + prompt)
 
     async def resolve_market(self, user_input: str, available_markets: List[str]) -> str:
         """Maps a user's natural language market request to the exact available market key."""

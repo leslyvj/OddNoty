@@ -36,8 +36,11 @@ def parse_track_command(text: str) -> dict[str, Any] | None:
         if m_kw:
             teams_part = text[:m_kw.start()].strip()
             rest = text[m_kw.start():].strip()
+        elif " vs " in text:
+            teams_part = text
+            rest = ""
         else:
-            return None # Not a tracking command if no keywords found
+            return None # Not a tracking or research command if no match
 
     teams_part = teams_part.replace(' :', '').strip()
     
